@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -32,22 +35,159 @@ func main() {
 	r.GET("/wagers", ListWager)
 
 	// place wager
-	r.POST("/wagers", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"message": "pong",
-		})
-	})
+	r.POST("/wagers", PlaceWager)
+
 	//buy wager
-	r.POST("buy/:wager_id", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"message": "pong",
-		})
-	})
+	r.POST("buy/:wager_id", BuyWagerHanlder)
 
 	err := r.Run()
 	if err != nil {
 		log.Fatal("err when init server", err)
 	}
+}
+func BuyWagerHanlder(c *gin.Context) {
+	var req BuyWagerReq
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	idStr := c.Param("wager_id")
+	wagerID, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	po, err := BuyWagerSrv(uint(wagerID), req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusCreated, po)
+}
+func BuyWagerSrv(wagerID uint, req BuyWagerReq) (BuyWager, error) {
+	if req.BuyingPrice <= 0 {
+		return BuyWager{}, errors.New("invalid_buying_price__must_greater_zero")
+	}
+
+	newLogger := logger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags), // io writer
+		logger.Config{
+			SlowThreshold:             time.Second, // Slow SQL threshold
+			LogLevel:                  logger.Info, // Log level
+			IgnoreRecordNotFoundError: true,        // Ignore ErrRecordNotFound error for logger
+			Colorful:                  true,        // Disable color
+		},
+	)
+	db, _ := gorm.Open(mysql.Open(dsn), &gorm.Config{Logger: newLogger})
+	var wagerInDb Wager
+	if err := db.First(&wagerInDb, wagerID).Error; err != nil {
+		return BuyWager{}, err
+	}
+	if req.BuyingPrice > wagerInDb.CurrentSellingPrice {
+		return BuyWager{}, errors.New("invalid_buying_price__must_less_than_selling_price")
+	}
+
+	//TODO put these action to transaction
+	buyWagerEntity := BuyWager{
+		WagerID:     wagerID,
+		BuyingPrice: req.BuyingPrice,
+		BoughtAt:    time.Now().UTC(),
+	}
+	if err := db.Create(&buyWagerEntity).Error; err != nil {
+		return BuyWager{}, err
+	}
+
+	// update corresponding wager
+	var updatedWager Wager
+	if err := db.First(&updatedWager, wagerID).Error; err != nil {
+		return BuyWager{}, err
+	}
+	updatedWager.CurrentSellingPrice -= req.BuyingPrice
+	updatedWager.AmountSold += req.BuyingPrice
+	updatedWager.PercentageSold = uint(math.Round(updatedWager.AmountSold / updatedWager.SellingPrice * 100))
+	if err := db.Save(updatedWager).Error; err != nil {
+		return BuyWager{}, err
+	}
+
+	return buyWagerEntity, nil
+}
+
+func PlaceWager(c *gin.Context) {
+	var req PlaceWagerReq
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	wager, err := PlaceWagerSrv(req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusCreated, wager)
+}
+
+const TwoDecimalPlacesFormat = 1e-9
+
+func PlaceWagerSrv(placeWager PlaceWagerReq) (Wager, error) {
+	if placeWager.SellingPercentage < 1 || placeWager.SellingPercentage > 100 || placeWager.Odds <= 0 || placeWager.SellingPrice <= 0 {
+		return Wager{}, errors.New("invalid_params")
+	}
+
+	if math.Abs(placeWager.SellingPrice*100-math.Round(placeWager.SellingPrice*100)) > TwoDecimalPlacesFormat {
+		return Wager{}, errors.New("invalid_selling_price_format")
+	}
+
+	sellPrice := float64(placeWager.TotalWagerValue) * (float64(placeWager.SellingPercentage) / 100)
+	if placeWager.SellingPrice <= sellPrice {
+		return Wager{}, errors.New("invalid_selling_price")
+	}
+
+	var mod Wager
+	mod, err := ConvertToWagerModel(placeWager)
+	if err != nil {
+		return Wager{}, err
+	}
+	mod.PlacedAt = time.Now().UTC()
+	mod.CurrentSellingPrice = mod.SellingPrice
+
+	newLogger := logger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags), // io writer
+		logger.Config{
+			SlowThreshold:             time.Second, // Slow SQL threshold
+			LogLevel:                  logger.Info, // Log level
+			IgnoreRecordNotFoundError: true,        // Ignore ErrRecordNotFound error for logger
+			Colorful:                  true,        // Disable color
+		},
+	)
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{Logger: newLogger})
+	createResult := db.Create(&mod)
+	if createResult.Error != nil {
+		return Wager{}, nil
+	}
+
+	return mod, nil
+}
+
+func ConvertToWagerModel(req PlaceWagerReq) (Wager, error) {
+	bs, err := json.Marshal(req)
+	if err != nil {
+		return Wager{}, err
+	}
+
+	var mod Wager
+	err = json.Unmarshal(bs, &mod)
+	if err != nil {
+		return Wager{}, err
+	}
+
+	return mod, nil
 }
 
 //	HANDLER LAYERS
@@ -88,7 +228,7 @@ func ListWagerRepo(pageInfo PageInfo) ([]Wager, error) {
 			SlowThreshold:             time.Second, // Slow SQL threshold
 			LogLevel:                  logger.Info, // Log level
 			IgnoreRecordNotFoundError: true,        // Ignore ErrRecordNotFound error for logger
-			Colorful:                  false,       // Disable color
+			Colorful:                  true,        // Disable color
 		},
 	)
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{Logger: newLogger})
@@ -105,7 +245,8 @@ func ListWagerRepo(pageInfo PageInfo) ([]Wager, error) {
 	query := db.Table("wagers")
 	query = query.Limit(pageInfo.Limit).Offset(offset).Order(order)
 
-	if err := query.Find(&models).Error; err != nil {
+	err = query.Find(&models).Error
+	if err != nil {
 		return nil, err
 	}
 	return models, nil
@@ -135,6 +276,16 @@ type PageInfo struct {
 	Limit   int
 	SortBy  string
 	OrderBy string
+}
+
+type PlaceWagerReq struct {
+	TotalWagerValue   uint    `json:"total_wager_value"`
+	Odds              uint    `json:"odds"`
+	SellingPercentage uint    `json:"selling_percentage"`
+	SellingPrice      float64 `json:"selling_price"`
+}
+type BuyWagerReq struct {
+	BuyingPrice float64 `json:"buying_price"`
 }
 
 // Wager : wager information
