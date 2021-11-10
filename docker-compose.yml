@@ -1,0 +1,43 @@
+version: "2.3"
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: test_wage_api
+    ports:
+      - "8080:8080"
+    expose:
+      - 8080
+    command: ./server
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./config.json:/app/config.json
+    tty: true
+
+  mysql:
+    image: mysql:latest
+    container_name: test_wage_mysql
+    volumes:
+      - ./sql/init_db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "3306:3306"
+    expose:
+      - 3306
+    environment:
+      MYSQL_DATABASE: wager
+      MYSQL_USER: wager
+      MYSQL_PASSWORD: 12345
+      MYSQL_ROOT_PASSWORD: 12345
+    healthcheck:
+      test: [ "CMD", "mysqladmin" ,"ping", "-h", "localhost" ]
+      timeout: 5s
+      retries: 10
+
+
+
+
+
+

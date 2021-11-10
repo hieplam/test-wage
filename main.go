@@ -13,7 +13,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const dsn = "root:12345@tcp(127.0.0.1:3306)/wager?charset=utf8mb4&parseTime=True&loc=Local"
+//const dsn = "wager:12345@tcp(127.0.0.1:3306)/wager?charset=utf8mb4&parseTime=True&loc=Local"
+//TODO  move to env, change localhost -> mysql viper, docker read from .env too
+const dsn = "wager:12345@tcp(mysql:3306)/wager?charset=utf8mb4&parseTime=True&loc=Local"
 
 func main() {
 	r := gin.Default()
