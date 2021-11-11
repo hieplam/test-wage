@@ -9,12 +9,17 @@ services:
       - "8080:8080"
     expose:
       - 8080
+    environment:
+      #set up env to override config.yml
+      DATABASE_HOST: "mysql"
+      #GIN_MODE: "release"
+      GIN_PORT: 8080
     command: ./server
     depends_on:
       mysql:
         condition: service_healthy
     volumes:
-      - ./config.json:/app/config.json
+      - ./config.yml:/app/config.yml
     tty: true
 
   mysql:
