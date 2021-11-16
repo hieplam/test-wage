@@ -23,17 +23,6 @@ func NewWagerRepo(db *gorm.DB) domain.WagerRepo {
 }
 
 func (r *Repo) ListWagers(pageInfo domain.PageInfo) ([]domain.Wager, error) {
-	if pageInfo.Page == 0 {
-		pageInfo.Page = 1
-	}
-	if pageInfo.OrderBy == "" {
-		pageInfo.OrderBy = "asc"
-	}
-
-	if pageInfo.SortBy == "" {
-		pageInfo.SortBy = "id"
-	}
-
 	var models []domain.Wager
 
 	offset := pageInfo.Page*pageInfo.Limit - pageInfo.Limit
@@ -51,24 +40,12 @@ func (r *Repo) ListWagers(pageInfo domain.PageInfo) ([]domain.Wager, error) {
 }
 
 func (r *Repo) PlaceWager(req domain.PlaceWagerReq) (domain.Wager, error) {
-	if req.SellingPercentage < 1 || req.SellingPercentage > 100 || req.Odds <= 0 || req.SellingPrice <= 0 {
-		return domain.Wager{}, errors.New("invalid_params")
-	}
-
-	if math.Abs(req.SellingPrice*100-math.Round(req.SellingPrice*100)) > 1e-9 {
-		return domain.Wager{}, errors.New("invalid_selling_price_format")
-	}
-
-	sellPrice := float64(req.TotalWagerValue) * (float64(req.SellingPercentage) / 100)
-	if req.SellingPrice <= sellPrice {
-		return domain.Wager{}, errors.New("invalid_selling_price")
-	}
-
 	var mod domain.Wager
 	mod, err := ConvertToWagerModel(req)
 	if err != nil {
 		return domain.Wager{}, err
 	}
+
 	mod.PlacedAt = time.Now().UTC()
 	mod.CurrentSellingPrice = mod.SellingPrice
 
@@ -94,10 +71,9 @@ func ConvertToWagerModel(req domain.PlaceWagerReq) (domain.Wager, error) {
 
 	return mod, nil
 }
+
 func (r *Repo) BuyWager(wagerID uint, req domain.BuyWagerReq) (domain.BuyWager, error) {
-	if req.BuyingPrice <= 0 {
-		return domain.BuyWager{}, errors.New("invalid_buying_price__must_greater_zero")
-	}
+
 	var wagerInDb domain.Wager
 	if err := r.db.First(&wagerInDb, wagerID).Error; err != nil {
 		return domain.BuyWager{}, err

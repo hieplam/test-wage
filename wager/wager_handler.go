@@ -19,6 +19,9 @@ func NewWagerHandler(e *gin.Engine, service domain.WagerService) {
 	handler := &Handler{
 		service: service,
 	}
+	e.GET("/", func(context *gin.Context) {
+		context.JSON(200, "hello")
+	})
 	e.GET("/wagers", handler.ListWagers)
 	e.POST("/wagers", handler.PlaceWager)
 	e.POST("buy/:wager_id", handler.BuyWager)
